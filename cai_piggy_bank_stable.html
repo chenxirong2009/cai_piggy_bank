@@ -130,91 +130,6 @@
           );
         };
 
-        // --- 画板组件 ---
-        const DrawingPad = ({ label, onSave, onClear }) => {
-          const canvasRef = useRef(null);
-          const [isDrawing, setIsDrawing] = useState(false);
-
-          useEffect(() => {
-            const canvas = canvasRef.current;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.lineWidth = 4;
-            ctx.lineCap = 'round';
-            ctx.strokeStyle = COLORS.blue; 
-          }, []);
-
-          const getPos = (e) => {
-            const canvas = canvasRef.current;
-            const rect = canvas.getBoundingClientRect();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            return {
-              x: clientX - rect.left,
-              y: clientY - rect.top
-            };
-          };
-
-          const startDrawing = (e) => {
-            e.preventDefault();
-            setIsDrawing(true);
-            const { x, y } = getPos(e);
-            const ctx = canvasRef.current.getContext('2d');
-            ctx.beginPath();
-            ctx.moveTo(x, y);
-          };
-
-          const draw = (e) => {
-            e.preventDefault();
-            if (!isDrawing) return;
-            const { x, y } = getPos(e);
-            const ctx = canvasRef.current.getContext('2d');
-            ctx.lineTo(x, y);
-            ctx.stroke();
-          };
-
-          const stopDrawing = () => {
-            setIsDrawing(false);
-            onSave(canvasRef.current.toDataURL());
-          };
-
-          const handleClear = () => {
-            const canvas = canvasRef.current;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            onClear();
-          };
-
-          return (
-            <div className="flex flex-col items-center w-full my-2">
-              <p className="text-sm text-gray-600 mb-1">{label}</p>
-              <canvas
-                ref={canvasRef}
-                width={250}
-                height={150}
-                className="border-4 rounded-xl cursor-crosshair touch-none bg-white"
-                style={{ borderColor: COLORS.blue, borderRadius: getRandomBlobShape() }}
-                onMouseDown={startDrawing}
-                onMouseMove={draw}
-                onMouseUp={stopDrawing}
-                onMouseOut={stopDrawing}
-                onTouchStart={startDrawing}
-                onTouchMove={draw}
-                onTouchEnd={stopDrawing}
-              />
-              <button 
-                type="button" 
-                onClick={handleClear}
-                className="mt-2 text-sm px-4 py-1 rounded-full border-2 text-gray-500 border-gray-300 hover:bg-gray-100"
-              >
-                擦除重画
-              </button>
-            </div>
-          );
-        };
-
         // --- 主应用 ---
         const App = () => {
           const [balance, setBalance] = useState(() => Number(localStorage.getItem('cai_balance')) || 0);
@@ -227,7 +142,8 @@
           const [modal, setModal] = useState({ isOpen: false, type: 'income' });
           const [draftAmount, setDraftAmount] = useState('');
           const [draftText, setDraftText] = useState('');
-          const [draftImage, setDraftImage] = useState(null);
+          const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+          const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, recordId: null });
           const [draftDate, setDraftDate] = useState(() => {
             const d = new Date();
             return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -242,14 +158,28 @@
             localStorage.setItem('cai_wishlist', JSON.stringify(wishlist));
           }, [balance, records, wishlist]);
 
+          const confirmDelete = (id) => {
+            setDeleteConfirm({ isOpen: true, recordId: id });
+          };
+
+          const executeDelete = () => {
+            const id = deleteConfirm.recordId;
+            const recordToDelete = records.find(r => r.id === id);
+            if (recordToDelete) {
+              setBalance(prev => prev - recordToDelete.amount);
+              setRecords(records.filter(r => r.id !== id));
+            }
+            setDeleteConfirm({ isOpen: false, recordId: null });
+          };
+
           const handleSaveRecord = () => {
             const amount = parseFloat(draftAmount);
             if (isNaN(amount) || amount <= 0) {
               alert("请输入正确的金额数字哦！");
               return;
             }
-            if (!draftText && !draftImage) {
-              alert("请写下或者画下原因哦！");
+            if (!draftText) {
+              alert("请写下原因哦！");
               return;
             }
             if (modal.type === 'expense' && balance - amount < 0) {
@@ -259,7 +189,7 @@
 
             const actualAmount = modal.type === 'income' ? amount : -amount;
             const [y, m, d] = draftDate.split('-');
-            const dateStr = `${parseInt(m)}/${parseInt(d)}`;
+            const dateStr = `${parseInt(m)}月${parseInt(d)}日`;
 
             setBalance(prev => prev + actualAmount);
             setRecords([{
@@ -267,7 +197,6 @@
               type: modal.type,
               amount: actualAmount,
               text: draftText,
-              image: draftImage,
               date: dateStr
             }, ...records]);
 
@@ -278,7 +207,6 @@
             setModal({ isOpen: false, type: 'income' });
             setDraftAmount('');
             setDraftText('');
-            setDraftImage(null);
             const d = new Date();
             setDraftDate(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
           };
@@ -404,34 +332,74 @@
 
                 <div>
                   <h2 className="text-xl font-bold mb-4 flex items-center gap-2" style={{ color: COLORS.text }}>
-                    📝 账本记录
+                    📝 近期账单记录
                   </h2>
                   <div className="space-y-3">
                     {records.length === 0 && <p className="text-gray-400 text-center py-4">还没有记录哦，快去记第一笔吧！</p>}
-                    {records.map(rec => (
+                    {records.slice(0, 5).map(rec => (
                       <div key={rec.id} className="bg-white p-4 flex items-center justify-between border-2 shadow-sm"
                            style={{ borderColor: rec.amount > 0 ? COLORS.green : COLORS.orange, borderRadius: getRandomBlobShape() }}>
                         <div className="flex items-center gap-3 overflow-hidden">
-                          {rec.image ? (
-                            <div className="w-16 h-16 border-2 border-gray-200 rounded-lg overflow-hidden flex-shrink-0 bg-white">
-                              <img src={rec.image} alt="涂鸦记录" className="w-full h-full object-contain" />
-                            </div>
-                          ) : null}
                           <div>
-                            <div className="font-bold text-lg truncate max-w-[150px]">{rec.text || '涂鸦记录'}</div>
-                            <div className="text-gray-400 text-sm">{rec.date}</div>
+                            <div className="font-bold text-lg truncate max-w-[150px]">{rec.text}</div>
+                            <div className="text-gray-500 font-bold text-sm">{rec.date}</div>
                           </div>
                         </div>
-                        <div className="font-black text-2xl flex-shrink-0" style={{ color: rec.amount > 0 ? COLORS.green : COLORS.orange }}>
-                          {rec.amount > 0 ? '+' : ''}{rec.amount}
+                        <div className="flex items-center gap-3">
+                          <div className="font-black text-2xl flex-shrink-0" style={{ color: rec.amount > 0 ? COLORS.green : COLORS.orange }}>
+                            {rec.amount > 0 ? '+' : ''}{rec.amount}
+                          </div>
+                          <button onClick={() => confirmDelete(rec.id)} className="w-8 h-8 flex items-center justify-center bg-gray-100 rounded-full text-sm active:scale-90 transition hover:bg-red-100" style={{ color: COLORS.orange }}>
+                            ✖️
+                          </button>
                         </div>
                       </div>
                     ))}
+                    {records.length > 5 && (
+                      <button 
+                        onClick={() => setIsHistoryOpen(true)}
+                        className="w-full py-3 mt-4 text-center font-bold text-gray-600 bg-gray-100 rounded-xl border-2 border-gray-200 hover:bg-gray-200 active:scale-95 transition"
+                      >
+                        📂 查看全部历史账单
+                      </button>
+                    )}
                   </div>
                 </div>
 
               </div>
 
+              {/* 历史账单全屏弹窗 */}
+              {isHistoryOpen && (
+                <div className="fixed inset-0 bg-white z-50 flex flex-col" style={{ backgroundColor: COLORS.bg }}>
+                  <div className="flex justify-between items-center p-4 border-b-4 border-black bg-white shadow-sm" style={{ borderColor: COLORS.blue }}>
+                    <h2 className="text-2xl font-black" style={{ color: COLORS.blue }}>📜 全部历史账单</h2>
+                    <button onClick={() => setIsHistoryOpen(false)} className="text-3xl font-black text-gray-500 active:scale-90 px-2">✕</button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-10">
+                    {records.map(rec => (
+                      <div key={rec.id} className="bg-white p-4 flex items-center justify-between border-2 shadow-sm"
+                           style={{ borderColor: rec.amount > 0 ? COLORS.green : COLORS.orange, borderRadius: getRandomBlobShape() }}>
+                        <div className="flex items-center gap-3 overflow-hidden">
+                          <div>
+                            <div className="font-bold text-lg truncate max-w-[200px]">{rec.text}</div>
+                            <div className="text-gray-500 font-bold text-sm">{rec.date}</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="font-black text-2xl flex-shrink-0" style={{ color: rec.amount > 0 ? COLORS.green : COLORS.orange }}>
+                            {rec.amount > 0 ? '+' : ''}{rec.amount}
+                          </div>
+                          <button onClick={() => confirmDelete(rec.id)} className="w-8 h-8 flex items-center justify-center bg-gray-100 rounded-full text-sm active:scale-90 transition hover:bg-red-100" style={{ color: COLORS.orange }}>
+                            ✖️
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 记账弹窗 Modal */}
               {modal.isOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
                   <div className="bg-white w-full max-w-sm rounded-3xl p-6 relative border-4 border-black max-h-[90vh] overflow-y-auto"
@@ -478,14 +446,6 @@
                       />
                     </div>
 
-                    <div className="text-center text-sm font-bold text-gray-400 my-2">—— 或者 ——</div>
-
-                    <DrawingPad 
-                      label={modal.type === 'income' ? '画一画是谁给的：' : '画一画买了什么：'}
-                      onSave={(dataUrl) => setDraftImage(dataUrl)} 
-                      onClear={() => setDraftImage(null)} 
-                    />
-
                     <div className="flex gap-3 mt-6">
                       <button 
                         onClick={closeModal}
@@ -502,6 +462,26 @@
                   </div>
                 </div>
               )}
+
+              {/* 删除确认弹窗 */}
+              {deleteConfirm.isOpen && (
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-[60]">
+                  <div className="bg-white w-full max-w-xs rounded-3xl p-6 relative border-4 border-black text-center"
+                       style={{ boxShadow: `8px 8px 0px ${COLORS.orange}` }}>
+                    <h2 className="text-xl font-black mb-4" style={{ color: COLORS.orange }}>要删除这条记录吗？</h2>
+                    <p className="text-sm text-gray-500 mb-6">删除后，小金库的钱会自动退回或扣除哦！</p>
+                    <div className="flex gap-3">
+                      <button onClick={() => setDeleteConfirm({ isOpen: false, recordId: null })} className="flex-1 py-3 bg-gray-200 text-gray-700 font-bold rounded-2xl border-2 border-gray-300">
+                        取消
+                      </button>
+                      <button onClick={executeDelete} className="flex-1 py-3 text-white font-black rounded-2xl border-4 border-black shadow-md" style={{ backgroundColor: COLORS.orange }}>
+                        确认删除
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
             </div>
           );
         };
